@@ -1,0 +1,91 @@
+//Maveric Garde 1:27 PM 11/16/2018
+#include <stdint.h>
+#include "../inc/msp432p401r.h"
+#include "../inc/BSP.h"				// Need to also Add Corresponding  BSP.c to the project
+#include "../inc/CortexM.h"   // Need to also Add Corresponding  CortexM.c to the project
+
+volatile uint32_t counts = 0;		// Global variables for tracking
+int select = 0; 
+
+// Interrupt service routine
+// Executed every 333ns*(period)
+void SysTick_Handler(void){   // Name must be identical to that in startupxxxx.s file. 
+	if (++counts == 10) {  	// Originally 10
+     counts=0;
+		ADC14CTL1 = (ADC14CTL1&~0x001F0000) | (0 << 16); 
+		ADC14CTL0 |= 0x00000003; 
+	}
+}
+
+void PORT4_IRQHandler(void){
+	if((P4IFG & 0x02) != 0){ //Accept flag and clear the bit
+		P4IFG &= ~0x02;  
+		select++; 
+		
+		BSP_LCD_DrawString(0, 3, " SELECT = ", BSP_LCD_Color565(255,0,255)); //Print header of the SELECT
+		BSP_LCD_SetCursor(15, 3); //move cursor 
+		BSP_LCD_OutUDec(select, BSP_LCD_Color565(0,0,255)); //print integer to the LCD 	
+	}
+}
+
+void ADC14_IRQHandler(void){
+	  uint16_t x,y; //Variables to handle the position of the the joystick default ~460
+		uint8_t select;
+	
+		x = ADC14MEM0>>4; 
+		y = ADC14MEM1>>4; 
+	
+		BSP_LCD_DrawString(10, 1, "     ", BSP_LCD_Color565(0,255,0));  // To erase larger number before display of smaller number
+		 BSP_LCD_SetCursor(10, 1);
+		 BSP_LCD_OutUDec(x, BSP_LCD_Color565(0,255,0));
+		 BSP_LCD_DrawString(10, 2, "     ", BSP_LCD_Color565(0,255,0));  // To erase larger number before display of smaller number
+		 BSP_LCD_SetCursor(10, 2);
+		 BSP_LCD_OutUDec(y, BSP_LCD_Color565(0,255,0));
+}
+
+void BSP_Joystick_int_init(){
+	//Enable interrupt 
+	P4IE |= 0x02; 
+	//Clear Flag
+	P4IFG &=~0x02; 
+	//Edge select 
+	P4IES |= 0x02; 
+	
+	//Enable interrupts for joystick x and y 
+	ADC14IER0 |= 0x00000003; 
+	
+	NVIC_IPR6 = (NVIC_IPR6 & 0xFFFFFF00) | 0x00000040; //priority 2 
+	NVIC_ISER0 |= 0x01000000; //IRQ24 enable interrupt 
+	
+	NVIC_IPR9 = (NVIC_IPR9 & 0xFF00FFFF) | 0x00400000; //priority 2 
+	NVIC_ISER1 |= 0x01000040; //IRQ39 enable interrupt 
+}
+
+int main(void) {
+	//disable dirty watchdog
+	WDTCTL = WDTPW | WDTHOLD;
+	//initialize the board, clock, joystick
+	BSP_Clock_InitFastest();
+	BSP_LCD_Init();
+	BSP_Joystick_Init();
+	BSP_Joystick_int_init(); 
+	
+	BSP_LCD_DrawString(0,0,"Joystick Demo", BSP_LCD_Color565(255,0,0));
+	
+//draw basic headers for the joystick position (X and Y)
+ 	BSP_LCD_DrawString(2, 1,"x = ", BSP_LCD_Color565(255,0,0));
+	BSP_LCD_DrawString(2, 2,"y = ", BSP_LCD_Color565(255,0,0));
+	
+	SYSTICK_STCSR = 0;		// Disable SysTick during setup
+	SYSTICK_STRVR = 300000-1;	// If clock is 3 MHz, period is 333ns. Maximum is 2^24-1. Minimum = length of ISR
+	SYSTICK_STCVR = 0;	// Any write clear the COUNT bit
+	
+	SYSPRI3 = (SYSPRI3&0x00FFFFFF)|0x40000000; // priority 2
+	SYSTICK_STCSR = BIT0 | BIT1 | BIT2;   		// 0x00000007 to enable interrupts
+	
+  EnableInterrupts();
+	
+	while(1){ //constant polling of the board. Set board to await interrupts
+		__ASM("wfi");
+	}
+}

@@ -1,0 +1,78 @@
+//Mav November 16th 2018
+//1:21 PM 11/16/2018
+#include <stdint.h>
+#include "../inc/msp432p401r.h"
+#include "../inc/BSP.h"				// Need to also Add Corresponding  BSP.c to the project
+#include "../inc/CortexM.h"   // Need to also Add Corresponding  CortexM.c to the project
+
+volatile uint32_t counts = 0;		// Global variables for tracking
+
+// Interrupt service routine
+// Executed every 333ns*(period)
+void SysTick_Handler(void){   // Name must be identical to that in startupxxxx.s file. 
+	if (++counts == 10) {  	// Originally 10
+     counts=0;
+		ADC14CTL1 = (ADC14CTL1&~0x001F0000) | (0 << 16); 
+		ADC14CTL0 |= 0x00000003; 
+	}
+}
+
+void Accel_init(void){
+	ADC14IER0 |= 0x00000010;
+	ADC14IFGR0 &= ~0x00000010; 
+	
+	NVIC_IPR6 = (NVIC_IPR6 & 0xFFFFFF00) | 0x00000040; //priority 2 
+	NVIC_ISER0 |= 0x01000000; //IRQ24 enable interrupt 
+	
+	NVIC_IPR9 = (NVIC_IPR9 & 0xFF00FFFF) | 0x00400000; //priority 2 
+	NVIC_ISER1 |= 0x01000040; //IRQ39 enable interrupt 
+}
+
+void ADC14_IRQHandler(void){
+	  uint16_t x,y,z;
+
+		BSP_Accelerometer_Input(&x,&y,&z); 
+		BSP_LCD_DrawString(10, 1, "     ", BSP_LCD_Color565(0,255,0));  // To erase larger number before display of smaller number
+		 BSP_LCD_SetCursor(10, 1); //set cursor to output Int
+		 BSP_LCD_OutUDec(x, BSP_LCD_Color565(0,255,0)); //write the corresponding X integer
+
+		 BSP_LCD_DrawString(10, 2, "     ", BSP_LCD_Color565(0,255,0));  // To erase larger number before display of smaller number
+		 BSP_LCD_SetCursor(10, 2); //set the cursor one row below X
+		 BSP_LCD_OutUDec(y, BSP_LCD_Color565(0,255,0));
+
+		 BSP_LCD_DrawString(10, 3, "     ", BSP_LCD_Color565(0,255,0));  // To erase larger number before display of smaller number
+		 BSP_LCD_SetCursor(10, 3); //set the cursor one row below Y
+		 BSP_LCD_OutUDec(z, BSP_LCD_Color565(0,255,0));
+}
+
+
+int main(void) {
+	
+	WDTCTL = WDTPW | WDTHOLD; //stop watchdog
+	//initialzation ritual:
+	BSP_Clock_InitFastest();
+	BSP_LCD_Init();
+	BSP_Accelerometer_Init();
+	Accel_init(); 
+	
+	BSP_LCD_DrawString(0,0,"Joystick Demo", BSP_LCD_Color565(255,0,0)); //Write the title of the lab upon the LCD
+	
+	//draw the headers of the values on the LCD
+ 	BSP_LCD_DrawString(2, 1,"x = ", BSP_LCD_Color565(255,0,0));
+	BSP_LCD_DrawString(2, 2,"y = ", BSP_LCD_Color565(255,0,0));
+	BSP_LCD_DrawString(2, 3,"z = ", BSP_LCD_Color565(255,0,0));
+	
+	
+	SYSTICK_STCSR = 0;		// Disable SysTick during setup
+	SYSTICK_STRVR = 300000-1;	// If clock is 3 MHz, period is 333ns. Maximum is 2^24-1. Minimum = length of ISR
+	SYSTICK_STCVR = 0;	// Any write clear the COUNT bit
+	
+	SYSPRI3 = (SYSPRI3&0x00FFFFFF)|0x40000000; // priority 2
+	SYSTICK_STCSR = BIT0 | BIT1 | BIT2;   		// 0x00000007 to enable interrupts
+	
+  EnableInterrupts();
+	
+	while(1){ //while loop + enable the board to wait for interupts
+		__ASM("wfi");
+	}
+}
